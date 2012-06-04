@@ -46,25 +46,14 @@ lrt_next_event_loc(lrt_event_loc l)
   return (l + 1) % lrt_num_event_loc();
 }
 
-static lrt_event_loc bsp_loc;
-
-void
-lrt_event_set_bsp(lrt_event_loc loc)
-{
-  bsp_loc = loc;
-}
-
-lrt_event_loc
-lrt_event_bsp_loc()
-{
-  return bsp_loc;
-}
 static struct lrt_event_descriptor lrt_event_table[LRT_EVENT_NUM_EVENTS];
 
 static idtdesc *idt;
 
 static inline void
 idt_map_vec(uint8_t vec, void *addr) {
+  idt[vec].raw[0] = 0;
+  idt[vec].raw[1] = 0;
   idt[vec].offset_low = ((uintptr_t)addr) & 0xFFFF;
   idt[vec].offset_high = ((uintptr_t)addr) >> 16;
   idt[vec].selector = 0x8; //Our code segment
@@ -83,14 +72,21 @@ init_idt(void)
   }
 }
 
+uint8_t *apic_id_table;
+
+uint8_t lrt_event_loc2apicid(lrt_event_loc loc) {
+  return apic_id_table[loc];
+}
+
 void
 lrt_event_preinit(int cores)
 {
   num_event_loc = cores;
-  idt = lrt_mem_alloc(sizeof(idtdesc) * 256, 8, lrt_event_bsp_loc());
+  idt = lrt_mem_alloc(sizeof(idtdesc) * 256, 8, 0);
   init_idt();
   LRT_Assert(has_lapic());
   disable_pic();
+
   //Disable the pit, irq 0 could have fired and therefore wouldn't
   //have been masked and then we enable interrupts so we must reset
   //the PIT (and we may as well prevent it from firing)
@@ -102,6 +98,9 @@ lrt_event_preinit(int cores)
   disable_rtc();
 
   enable_lapic();
+
+  ioapic *addr = acpi_get_ioapic_addr();
+  init_ioapic(addr);
 }
 
 void __attribute__ ((noreturn))
@@ -125,7 +124,7 @@ lrt_event_init(void *unused)
 
   enable_lapic();
 
-  lrt_event_loc loc = get_lapic_id();
+  lrt_event_loc loc = smp_lock + 1;
 
   lrt_event_loc *myloc = lrt_mem_alloc(sizeof(lrt_event_loc),
                                        sizeof(lrt_event_loc),
@@ -145,13 +144,14 @@ lrt_event_init(void *unused)
 #define STACK_SIZE (1 << 14)
   char *myStack = lrt_mem_alloc(STACK_SIZE, 16, lrt_my_event_loc());
 
-  asm volatile (
+    asm volatile (
                 "mov %[stack], %%rsp\n\t"
                 "mfence\n\t"
-                "movl $0x0, %[smp_lock]\n\t"
+                "movl %[val], %[smp_lock]\n\t"
                 "call lrt_start"
                 :
                 : [stack] "r" (&myStack[STACK_SIZE]),
+                  [val] "r" (loc),
                   [smp_lock] "m" (smp_lock)
                 );
   lrt_event_loop();
@@ -178,7 +178,7 @@ lrt_event_trigger_event(lrt_event_num num, enum lrt_event_loc_desc desc,
   icr_high.raw = 0;
   if (desc == LRT_EVENT_LOC_SINGLE) {
     icr_low.destination_shorthand = 0;
-    icr_high.destination = loc;
+    icr_high.destination = lrt_event_loc2apicid(loc);
   } else {
     LRT_Assert(0);
   }
@@ -194,7 +194,13 @@ void lrt_event_route_irq(struct IRQ_t *isrc, lrt_event_num num,
 
 void
 exception_common(uint8_t num) {
-  lrt_printf("Received exception %d\n!", num);
+  uintptr_t *stack;
+  asm volatile ("mov %%rsp, %[stack]"
+                : [stack] "=r" (stack));
+  for (int i = 0; i < 10; i++) {
+    lrt_printf("%lx: %lx\n", (uintptr_t)(stack+i), stack[i]);
+  }
+  lrt_printf("core: %d: Received exception %d!\n", lrt_my_event_loc(), num);
   LRT_Assert(0);
 }
 

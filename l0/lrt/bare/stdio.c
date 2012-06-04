@@ -131,6 +131,9 @@ prints(const char *str, int width, int precision, unsigned char flags,
   }
   for(; precision != 0 && *str != '\0'; str++, precision--) {
     putc(*str, stream);
+    if (*str == '\n') {
+      putc('\r', stream);
+    }
     count++;
   }
   for(; width > 0; width--) {
@@ -202,6 +205,9 @@ static int printi(long long val, unsigned int base, int sign,
 int
 vfprintf(FILE *stream, const char *format, va_list ap)
 {
+  static volatile int lock;
+  while (!__sync_bool_compare_and_swap(&lock, 0, 1))
+    ;
   unsigned char flags;
   unsigned int count = 0;
   unsigned int width;
@@ -335,5 +341,6 @@ vfprintf(FILE *stream, const char *format, va_list ap)
       count += prints(cr, 0, 1, 0, stream);
     }
   }
+  lock = 0;
   return count;
 }

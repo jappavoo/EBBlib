@@ -54,30 +54,25 @@ char *_smp_stack;
 static void
 init_smp(void)
 {
-  _smp_stack = lrt_mem_alloc(SMP_STACK_SIZE, 16, lrt_event_bsp_loc());
-  extern char start_smp[];
-  extern char end_smp[];
+  _smp_stack = lrt_mem_alloc(SMP_STACK_SIZE, 16, 0);
+  extern char _smp_start[];
+  extern char _smp_end[];
 
-  for (int i = 0; i < (end_smp - start_smp); i++) {
-    ((char *)SMP_START_ADDRESS)[i] = start_smp[i];
+  for (int i = 0; i < (_smp_end - _smp_start); i++) {
+    ((char *)SMP_START_ADDRESS)[i] = _smp_start[i];
   }
 
   int cores = lrt_num_event_loc();
-  for (int i = 0; i < cores; i++) {
-    if (i == lrt_event_bsp_loc()) {
-      continue;
-    }
-
-    while (!__sync_bool_compare_and_swap(&smp_lock, 0, 1))
-      ;
+  for (int i = 1; i < cores; i++) {
 
     lapic_icr_low icr_low;
     icr_low.raw = 0;
     icr_low.delivery_mode = 0x5;
+    icr_low.level = 1;
 
     lapic_icr_high icr_high;
     icr_high.raw = 0;
-    icr_high.destination = i;
+    icr_high.destination = lrt_event_loc2apicid(i);
 
     send_ipi(icr_low, icr_high);
 
@@ -89,7 +84,11 @@ init_smp(void)
     icr_low.delivery_mode = 0x6;
 
     send_ipi(icr_low, icr_high);
+
+    while (smp_lock != i)
+      ;
   }
+  smp_lock = -1;
 }
 
 void __attribute__ ((noreturn))
@@ -126,8 +125,6 @@ init64(multiboot_info_t *mbi) {
 
   /* //get start args */
   acpi_init();
-  int bsp = acpi_get_bsp();
-  lrt_event_set_bsp(bsp);
   int cores = acpi_get_num_cores();
   lrt_printf("num cores = %d\n", cores);
   lrt_mem_preinit(cores);
