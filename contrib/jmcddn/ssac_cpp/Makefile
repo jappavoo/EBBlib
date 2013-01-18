@@ -3,7 +3,9 @@ hdrs = $(patsubst %.c,%.h,$(classes))
 src = eosSSACTest.C $(classes)
 objs = $(patsubst %.C,%.o,$(src))
 libs = -lpthread 
-CXXFLAGS=-g -O0 -Wall
+CXXFLAGS=-D_BG_ -g -O0 -Wall -I/bgsys/drivers/ppcfloor/arch/include
+CXX=mpicxx
+#CXX=g++
 
 all: eosSSACTest
 
@@ -11,13 +13,13 @@ all: eosSSACTest
 
 # compile and generate dependency info
 %.o: %.C
-	g++ -c $(CXXFLAGS) $*.C -o $*.o
-	g++ -MM $(CXXFLAGS) $*.C > $*.d
+	${CXX} -c $(CXXFLAGS) $*.C -o $*.o 
+	${CXX} -MM $(CXXFLAGS) $*.C > $*.d 
 
 eosSSACTest.o: Test.H 
 
 eosSSACTest: $(objs) $(hdrs)
-	g++ ${CXXFLAGS} $(objs) $(libs) -o eosSSACTest 
+	${CXX} ${CXXFLAGS} $(objs) $(libs) -o eosSSACTest 
 
 clean:
 	rm -f *.o *.d eosSSACTest

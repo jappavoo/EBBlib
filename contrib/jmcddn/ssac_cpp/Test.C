@@ -7,6 +7,17 @@
 #include <mach/mach_interface.h>
 #include <mach/thread_policy.h>
 #endif
+#ifdef _BG_
+#include <spi/bgp_SPI.h>
+#include <spi/kernel_interface.h>
+#include <common/bgp_personality.h>
+#include <common/bgp_personality_inlines.h>
+
+// BG NOTES
+// int MPIX_Pset_same_comm_create (MPI_Comm *pset_comm);
+// int MPIX_Cart_comm_create (MPI_Comm *cart_comm);
+// int MPIX_Pset_diff_comm_create (MPI_Comm *pset_comm);
+#endif
 
 #include "EBBKludge.H"
 #include "Test.H"
@@ -41,7 +52,11 @@ static num_phys_cores()
   }
   return numcores;
 #else // if LINUX/UNIX
+#ifdef _BG_
+  return Kernel_ProcessorCount();
+#else
   return sysconf(_SC_NPROCESSORS_ONLN);
+#endif
 #endif
 }
 
@@ -76,6 +91,7 @@ create_bound_thread(pthread_t *tid, int id,  void *(*func)(void *), void *arg)
     int numcores, pid, rc;
   numcores = num_phys_cores();
   pid = id % numcores;
+  printf("numcores=%d pid=%d\n", numcores, pid);
 
   if ((id < 0)) return -1;
 
