@@ -30,6 +30,7 @@ fi
 builddir=$dir/../build
 sysdir=$builddir/$(uname -s)
 system=$(uname -s)
+machine=$(uname -m)
 
 mkdir -p $sysdir
 
@@ -39,6 +40,16 @@ case $system in
 	;;
 esac
 
+# added the following to allow argonne front ends to be default to building 
+# ppc-bm for bg
+case $machine in
+    ppc64)
+       EBBCC=powerpc-bgp-linux-gcc
+       EBBCXX=powerpc-bgp-linux-g++
+       XFLG="--host=powerpc-unknown-linux --enable-baremetal"
+       ;;
+esac
+ 
 for dl in $DEBUGDIRS
 do
   mkdir $sysdir/$dl
