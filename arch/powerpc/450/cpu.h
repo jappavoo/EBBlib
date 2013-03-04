@@ -49,5 +49,33 @@ typedef union {
 
 STATIC_ASSERT(sizeof(msr) == 4, "msr packing issue");
 
+typedef union {
+  uint32_t val;
+  struct {
+    uint32_t wp :2; //watchdog timer period
+    uint32_t wcr :2; //watchdog timer reset ctl
+    uint32_t wie :1; //watchdog timer interupt enable
+    uint32_t die :1; //dec interupt enable
+    uint32_t fp :2; //fixed interval timer period
+    uint32_t fie :1; //fit interrupt enable
+    uint32_t are :1; //auto reload enable
+    uint32_t reserved :22;
+  };
+} tcr;
+
+STATIC_ASSERT(sizeof(tcr) == 4, "tcr packing issue");
+
+typedef union {
+  uint32_t val;
+  struct {
+    uint32_t enw :1; //enable next watchdog timer exception
+    uint32_t wis :1; //watchdog timer interrupt status
+    uint32_t wrs :2; //watchdog timer reset status
+    uint32_t dis :1; //decrementer interrupt status
+    uint32_t fis :1; //fixed interval timer interrupt status
+    uint32_t reserved :26;
+  };
+} tsr;
+#define CACHE_LINE_ALIGNMENT 32
 
 #endif

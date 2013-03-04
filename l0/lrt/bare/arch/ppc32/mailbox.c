@@ -25,6 +25,8 @@
 #include <stdint.h>
 
 #include <l0/lrt/bare/stdio.h>
+#include <l0/lrt/bare/arch/ppc32/fdt.h>
+#include <l0/lrt/bare/arch/ppc32/mmu.h>
 #include <lrt/string.h>
 
 struct bgp_mailbox_desc {
@@ -40,19 +42,14 @@ typedef struct bgp_mailbox {
   char data[0];
 } bgp_mailbox;
 
-#define BGP_DCR_TEST(x)			(0x400 + (x))
-#define BGP_DCR_GLOB_ATT_WRITE_SET	BGP_DCR_TEST(0x17)
-#define BGP_DCR_GLOB_ATT_WRITE_CLEAR	BGP_DCR_TEST(0x18)
-#define BGP_DCR_TEST_STATUS6		BGP_DCR_TEST(0x3a)
-#define   BGP_TEST_STATUS6_IO_CHIP	(0x80000000U >> 3)
 
-#define BGP_ALERT_OUT(core)	        (0x80000000U >> (24 + core))
-#define BGP_ALERT_IN(core)	        (0x80000000U >> (28 + core))
+static int bgp_dcr_glob_att_write_set;
+static int bgp_dcr_glob_att_write_clear;
+static int bgp_dcr_mask;
 
-//FIXME: read from FDT, these are hardcoded
-static bgp_mailbox * const bgp_mbox = (bgp_mailbox *)(0xfffff400);
-#define BGP_MBOX_SIZE (0xf8)
-static char bgp_mbox_buffer[BGP_MBOX_SIZE];
+static bgp_mailbox *bgp_mbox;
+static int bgp_mbox_size;
+static char bgp_mbox_buffer[256];
 static uintptr_t bgp_mbox_buffer_len = 0;
 
 static int
@@ -60,7 +57,7 @@ mailbox_putc(int c)
 {
   bgp_mbox_buffer[bgp_mbox_buffer_len++] = c;
   
-  if (bgp_mbox_buffer_len >= BGP_MBOX_SIZE || c == '\n') {
+  if (bgp_mbox_buffer_len >= bgp_mbox_size || c == '\n') {
     memcpy(&bgp_mbox->data, bgp_mbox_buffer, bgp_mbox_buffer_len);
     bgp_mbox->len = bgp_mbox_buffer_len;
     bgp_mbox->command = 2;
@@ -68,8 +65,8 @@ mailbox_putc(int c)
 		  "mbar;"
 		  "mtdcrx %[dcrn], %[val];"
 		  :
-		  : [dcrn] "r" (BGP_DCR_GLOB_ATT_WRITE_SET),
-		    [val] "r" (BGP_ALERT_OUT(0)),
+		  : [dcrn] "r" (bgp_dcr_glob_att_write_set),
+		    [val] "r" (bgp_dcr_mask),
 		    "m" (*bgp_mbox)
 		  );
     do {
@@ -83,14 +80,16 @@ mailbox_putc(int c)
     asm volatile (
     		  "mtdcrx %[dcrn], %[val];"
     		  :
-    		  : [dcrn] "r" (BGP_DCR_GLOB_ATT_WRITE_CLEAR),
-    		    [val] "r" (BGP_ALERT_OUT(0)),
+    		  : [dcrn] "r" (bgp_dcr_glob_att_write_clear),
+    		    [val] "r" (bgp_dcr_mask),
     		    "m" (*bgp_mbox)
     		  );
     bgp_mbox_buffer_len = 0;
   }
   return c;
 }
+
+#include <l0/lrt/event.h>
 
 static int
 mailbox_write(uintptr_t cookie, const char *str, int len) 
@@ -106,8 +105,38 @@ FILE mailbox = {
   .write = mailbox_write
 };
 
+static const int MB_MAP_SIZE = 1 << 10; //1K
+
+static uint64_t paddr_aligned;
+static uintptr_t vaddr;
+
 FILE *
 mailbox_init()
 {
+  struct fdt_node *console = fdt_get("/jtag/console0");
+  struct fdt_node *reg = fdt_get_in_node(console, "reg");
+  uint64_t paddr = fdt_read_prop_u64(reg, 0);
+  paddr |= 0x700000000LL; //THIS IS BECAUSE UBOOT IS BROKEN  
+  paddr_aligned = paddr & ~(MB_MAP_SIZE - 1); //align
+  vaddr = (uintptr_t)tlb_map(paddr_aligned, MB_MAP_SIZE,
+			     TLB_INHIBIT | TLB_GUARDED);
+  bgp_mbox = (bgp_mailbox *)(vaddr + (uintptr_t)(paddr_aligned - paddr));
+  
+  bgp_mbox_size = fdt_read_prop_u32(reg, 8);
+
+  struct fdt_node *dcr_reg = fdt_get_in_node(console, "dcr-reg");
+  bgp_dcr_glob_att_write_set = fdt_read_prop_u32(dcr_reg, 0);
+  bgp_dcr_glob_att_write_clear = fdt_read_prop_u32(dcr_reg, 4);
+
+  struct fdt_node *dcr_mask = fdt_get_in_node(console, "dcr-mask");
+  bgp_dcr_mask = fdt_read_prop_u32(dcr_mask, 0);
+
   return &mailbox;
+}
+
+void
+mailbox_secondary_init()
+{
+  tlb_map_fixed(paddr_aligned, vaddr, MB_MAP_SIZE,
+		TLB_INHIBIT | TLB_GUARDED);
 }

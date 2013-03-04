@@ -20,20 +20,12 @@
  * THE SOFTWARE.
  */
 
-#include <config.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <pthread.h>
-
 extern "C" {
 #include <lrt/assert.h>
 #include <lrt/io.h>
+#include <l0/lrt/exit.h>
 #include <l0/lrt/trans.h>
 #include <l0/lrt/types.h>
-#include <l0/types.h>
-#include <l0/sys/trans.h>
 #include <l0/cobj/cobj.h>
 #include <l0/cobj/CObjEBB.h>
 #include <l0/cobj/CObjEBBRoot.h>
@@ -45,145 +37,191 @@ extern "C" {
 #include <l0/MemMgr.h>
 #include <l0/MemMgrPrim.h>
 #include <l1/App.h>
+#include <arch/atomic.h>
 }
 #include <l0/cplus/CPlusEBB.H>
 #include <l0/cplus/CPlusEBBRoot.H>
 #include <l0/cplus/CPlusEBBRootShared.H>
 
-#include <contrib/jmcddn/ssac_cpp/EBBKludge.H>
-#include <contrib/jmcddn/ssac_cpp/Test.H>
-#include <contrib/jmcddn/ssac_cpp/SSACSimpleSharedArray.H>
+//TODO: remove kludge!!
+#include "EBBKludge.H"
+#include "ebb/Test.H"
+#include "lib/SSACSimpleSharedArray.H"
+#include "lib/SSACSimplePartitionedArray.H"
+
+#define DEFAULT_HASHQ_COUNT 192
+
+class SSACTest;
+typedef SSACTest **SSACTestId;
 
 class SSACTest : public Test {
 protected:
   SSACId ssac;
-  enum {HASHTABLESIZE=8192};//this is the size of hashqs, each with an 'associative' ammount of entries.
-  EBBRC work(int id);
-  EBBRC init();
-  EBBRC end();
+  int numEvents;  
+  double writePct; 
+  //size of hashqs, each with an 'associative' ammount of cache entries.
+  // TODO: set associativity
+  enum { HASHTABLESIZE = DEFAULT_HASHQ_COUNT };
+  virtual EBBRC init();
+  virtual EBBRC end();
+  virtual EBBRC setup();
+  virtual EBBRC work(int id);
 public:
-  SSACTest(int n, int m, int c, bool p, double wpct): Test(n,m,c,p,wpct) {}
-
+  static EBBRC create(TestId &rep);
+  virtual EBBRC set_vars(int m, int n, int w);
 };
 
-EBBRC
-SSACTest::init()
+EBBRC 
+SSACTest::setup(void) 
 {
-//  TRACE("BEGIN");
-  CacheObjectIdSimple id(0);
-  CacheEntrySimple *entry=0;
-  EBBRC rc;
-  // run through each entry of the hashqs, clear value & h
-  DREF(ssac)->flush();
+  TRACE("SSACTest::");
+  return 1;
+}
 
-  for (unsigned long i=0; i<HASHTABLESIZE; i++) {
-    id = i;
-    rc=DREF(ssac)->get((CacheObjectId &)id,(CacheEntry * &)entry,
-		       SSAC::GETFORWRITE);
-    entry->data = (void *)i; // set data pointer to i TODO: verify
-    rc=DREF(ssac)->putback((CacheEntry * &)entry, SSAC::KEEP);
-  }
-//  TRACE("END");
-  return rc;
+EBBRC
+SSACTest::set_vars(int m, int n, int w)
+{
+  iterations = m; 
+  numEvents = n; 
+  writePct = w; 
+  return 1;
+}
+
+EBBRC
+SSACTest::init() { 
+  return 1; 
 }
 
 EBBRC
 SSACTest::work(int myid)
 {
-  //  TRACE("BEGIN");
+  TRACE("BEGIN");
   CacheObjectIdSimple id(0);
   CacheEntrySimple *entry=0;
-  int readCount, writeCount;
+ // int readCount, writeCount;
   EBBRC rc;
   intptr_t v;
 
-  readCount = (1-writePct) * numEvents;
-  writeCount = writePct * numEvents;
+  //readCount = (1-writePct) * numEvents;
+  //writeCount = writePct * numEvents;
   rc = 0;
 
   for (int j=0; j<1;j++) {
-    // write to SSAC data object (increase pointer by 1)
-    for (int i=0; i<writeCount; i++) {
+    for (int i=0; i<numEvents; i++) {
+    //for (int i=0; i<writeCount; i++) {
       id = i;
-      rc = DREF(ssac)->get((CacheObjectId &)id,(CacheEntry * &)entry,
-			   SSAC::GETFORWRITE);
+      rc = CPLUS_EBBCALL(ssac, get, (CacheObjectId &)id,(CacheEntry * &)entry, SSAC::GETFORWRITE);
       v=(intptr_t)entry->data; v++; entry->data=(void *)v;
       entry->dirty();
-      rc =DREF(ssac)->putback((CacheEntry * &)entry, SSAC::KEEP);
+      rc = CPLUS_EBBCALL(ssac, putback,(CacheEntry * &)entry, SSAC::KEEP);
     }
-    for (int k=0; k<readCount; k++){
-      id = k;
-      rc = DREF(ssac)->get((CacheObjectId &)id,(CacheEntry * &)entry,
-			   SSAC::GETFORREAD);
-      v=(intptr_t)entry->data;
-    }
+   // for (int k=0; k<readCount; k++){
+   //   id = k;
+   //   rc = CPLUS_EBBCALL(ssac, get, (CacheObjectId &)id,(CacheEntry * &)entry, SSAC::GETFORREAD);
+   //   v=(intptr_t)entry->data;
+   // }
   }
-  //  TRACE("END");
   return rc;
 }
 
 EBBRC
 SSACTest::end()
 {
- // TRACE("BEGIN");
- // DREF(ssac)->snapshot();
-//  TRACE("Tests:end: \n");
-  Test::end();
-//  TRACE("END");
-  return 0;
+  EBBRC rc;
+  rc = CPLUS_EBBCALL(ssac, snapshot);
+/* DUMP OUT TEST DATA
+  int index;
+  printf("Test, Process, Start, End, Dif\n");
+  for (int i=0; i<iterations; i++)
+    for (int j=0; j<numWorkers; j++){
+      index = (i*numWorkers)+j;
+      printf("%d, %d, %llu, %llu, %llu\n", i, j, wargs[index].start, wargs[index].end, wargs[index].end - wargs[index].start);
+    }
+*/
+  return rc;
 }
 
-class SSATest : public SSACTest {
+
+/* *************************************************** */
+
+
+class SimpleSharedTest : public SSACTest {
 public:
-  SSATest(int n, int m, int c, bool p, double wpct);
-  virtual ~SSATest();
+  static EBBRC create(SSACTestId &rep);
+  EBBRC setup(void); 
 };
 
-SSATest::SSATest(int n, int m, int c, bool p, double wpct) : SSACTest(n,m,c,p,wpct)
+EBBRC
+SimpleSharedTest::setup(void) 
 {
-  // init hash table
+  EBBRC rc;
+  TRACE("SimpleSharedTest::");
   SSACSimpleSharedArray::Create(ssac, HASHTABLESIZE);
+  CacheObjectIdSimple id(0);
+  CacheEntrySimple *entry=0;
+  rc = CPLUS_EBBCALL(ssac, flush);
+  for (unsigned long i=0; i<HASHTABLESIZE; i++) {
+    id = i;
+    rc = CPLUS_EBBCALL(ssac, get, (CacheObjectId &)id,(CacheEntry * &)entry, SSAC::GETFORWRITE);
+    entry->data = (void *)i; // set data pointer 
+    rc = CPLUS_EBBCALL(ssac, putback,(CacheEntry * &)entry, SSAC::KEEP);
+  }
+  return rc;
 }
 
-SSATest::~SSATest()
-{
-  // DREF(ssac)->destroy();
-}
-
-void
-SSACSimpleSharedArrayTest(int numWorkers, int numIterations, int numEvents, bool bindThread, double wpct)
-{
-  SSATest test(numWorkers, numIterations, numEvents, bindThread, wpct);
-  test.doTest();
-}
-/* *************************************** */
 
 EBBRC
-SSACTST_start(AppRef _self, int argc, char **argv,
-	      char **environ)
+SimpleSharedTest::create(SSACTestId &ssa)
 {
-  lrt_printf("SSACTST LOADED\n");
-  int n=4; // thread count
-  int m=1; // no. of iterations
-  bool p=1; // bind threads?
-  double w=0.5; // test read/write percentage
-  int c=1000; // test event no
-  if (argc>1) n=atoi(argv[1]);
-  if (argc>2) m=atoi(argv[2]);
-  if (argc>3) c=atoi(argv[3]);
-  if (argc>4) w=atof(argv[4]);
-  if (argc>5) p=atoi(argv[5]);
-  SSACSimpleSharedArrayTest(n,m,c,p,w);
-  lrt_printf("finished simpleTst\n");
+  EBBRC rc;
+  SimpleSharedTest *rep;
+  CPlusEBBRootShared *root;
+  rep = new SimpleSharedTest();
+  root = new CPlusEBBRootShared();
+  // setup representative and root
+  root->init(rep);
+  rc = EBBAllocPrimId((EBBId *)&ssa);
+  LRT_RCAssert(rc);
+  rc = CPlusEBBRoot::EBBBind((EBBId)ssa, root); 
+  LRT_RCAssert(rc);
+
   return EBBRC_OK;
 }
+
+/* *************************************** */
 
 CObject(SSACTST) {
   CObjInterface(App) *ft;
 };
 
+EBBRC
+SSACTST_start(AppRef _self )
+{
+
+#if 0
+  int m=1; // no. of iterations
+  double w=0.5; // test read/write percentag
+  int c=1000; // test event noo
+  FIXME: get start_infok
+  if (argc>1) n=atoi(argv[1]);
+  if (argc>2) m=atoi(argv[2]);
+  if (argc>3) c=atoi(argv[3]);
+  if (argc>4) w=atof(argv[4]);
+  if (argc>5) p=atoi(argv[5]);
+#endif 
+  
+  // create the ebb id
+  SSACTestId ssa_test;
+  SimpleSharedTest::create(ssa_test);
+  CPLUS_EBBCALL(ssa_test, set_vars, 3, 5, 5);
+  CPLUS_EBBCALL(ssa_test, run);
+
+  lrt_printf("Compleated SSAC Test App!\n");
+  return EBBRC_OK;
+}
+
 CObjInterface(App) SSACTST_ftable = {SSACTST_start};
 
 extern "C" {
-APP(SSACTST);
+APP_START_ONE(SSACTST);
 }

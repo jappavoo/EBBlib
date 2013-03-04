@@ -24,10 +24,110 @@
 
 #include <arch/powerpc/cpu.h>
 #include <arch/powerpc/mmu.h>
-#include <l0/lrt/bare/arch/ppc32/pic.h>
-#include <l0/lrt/bare/arch/ppc32/trans.h>
+#include <l0/lrt/mem.h>
+#include <l0/lrt/trans.h>
 #include <lrt/assert.h>
 
+static char *theGMem;
+static lrt_trans_ltrans **lmem_table;
+
+void
+lrt_trans_preinit(int cores) 
+{
+  //Allocate GMem
+  theGMem = lrt_mem_alloc(LRT_TRANS_TBLSIZE, LRT_TRANS_TBLSIZE, 0);
+  
+  //alloctable lmem table (stores pointers to lmem for each core)
+  lmem_table = lrt_mem_alloc(sizeof(lrt_trans_ltrans *) * cores,
+                             sizeof(lrt_trans_ltrans *),
+                             0);
+}
+
+void
+lrt_trans_specific_init() 
+{
+  //allocate lmem
+  lrt_trans_ltrans *lmem = lrt_mem_alloc(LRT_TRANS_TBLSIZE, LRT_TRANS_TBLSIZE,
+                             lrt_my_event_loc());
+  lmem_table[lrt_my_event_loc()] = lmem;
+
+  //map in gmem
+  tlb_word_0 t0;
+  t0.val = 0;
+  t0.epn = LRT_TRANS_GMEM >> 10;
+  t0.v = 1;
+  //log2(size >> 10) / 2
+  int size = (31 - __builtin_clz(LRT_TRANS_TBLSIZE >> 10)) / 2; 
+  t0.size = size;
+
+  tlb_word_1 t1;
+  t1.val = 0;
+  t1.rpn = ((uintptr_t)theGMem >> 10) & 0x3fffff;
+
+  tlb_word_2 t2;
+  t2.val = 0;
+  t2.wl1 = 1;
+  t2.m = 1;
+  t2.sx = 1;
+  t2.sw = 1;
+  t2.sr = 1;
+
+  asm volatile (
+		"tlbwe %[word0],%[entry],0;"
+		"tlbwe %[word1],%[entry],1;"
+		"tlbwe %[word2],%[entry],2;"
+		"isync;"
+		:
+		: [word0] "r" (t0.val),
+		  [word1] "r" (t1.val),
+		  [word2] "r" (t2.val),
+		  [entry] "r" (63) 
+		);  
+
+  //map in lmem
+  t0.val = 0;
+  t0.epn = LRT_TRANS_LMEM >> 10;
+  t0.v = 1;
+  //log2(size >> 10) / 2
+  size = (31 - __builtin_clz(LRT_TRANS_TBLSIZE >> 10)) / 2; 
+  t0.size = size;
+
+  t1.val = 0;
+  t1.rpn = ((uintptr_t)lmem >> 10) & 0x3fffff;
+
+  t2.val = 0;
+  t2.wl1 = 1;
+  t2.m = 1;
+  t2.sx = 1;
+  t2.sw = 1;
+  t2.sr = 1;
+
+  asm volatile (
+		"tlbwe %[word0],%[entry],0;"
+		"tlbwe %[word1],%[entry],1;"
+		"tlbwe %[word2],%[entry],2;"
+		"isync;"
+		:
+		: [word0] "r" (t0.val),
+		  [word1] "r" (t1.val),
+		  [word2] "r" (t2.val),
+		  [entry] "r" (62) 
+		);  
+  
+}
+
+void lrt_trans_invalidate_rltrans(lrt_event_loc el, lrt_trans_id oid)
+{
+  lrt_trans_ltrans *lmem = lmem_table[el];
+  ptrdiff_t index = oid - lrt_trans_idbase();
+  lrt_trans_ltrans *rlt = lmem + index; /* pointer to remote local entry */
+
+  lrt_trans_ltrans *lt = lrt_trans_id2lt(oid);
+  rlt->ref = &lt->rep;
+  rlt->rep = lrt_trans_def_rep;
+  
+}
+/*
 static uint8_t theGMem[LRT_TRANS_TBLSIZE] 
 __attribute__((aligned(LRT_TRANS_TBLSIZE)));
 
@@ -118,3 +218,4 @@ lrt_trans_id2rlt(lrt_pic_id picid, uintptr_t oid)
 
   return lrt_trans_id2lt(oid);
 }
+*/

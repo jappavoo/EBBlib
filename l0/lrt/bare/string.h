@@ -26,5 +26,4 @@
 
 size_t strlen(const char *s);
 char *strcpy(char * restrict s1, const char * restrict s2);
-
 #endif

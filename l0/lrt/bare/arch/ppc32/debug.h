@@ -1,3 +1,6 @@
+#ifndef L0_LRT_BARE_ARCH_PPC32_DEBUG
+#define L0_LRT_BARE_ARCH_PPC32_DEBUG
+
 /*
  * Copyright (C) 2011 by Project SESA, Boston University
  *
@@ -20,12 +23,17 @@
  * THE SOFTWARE.
  */
 
-#include <arch/powerpc/asdef.h>
+void debug_init(void);
+void debug_secondary_init(void);
+int get_debug_status(void);
+void set_debug_val(int val);
+int get_debug_val(void);
 
-	.globl lrt_start_isr
-lrt_start_isr:
-	lis	r20, lrt_start@h
-	ori	r20, r20, lrt_start@l
-	mtctr	r20
-	bctrl
-	rfi
+#define BREAKPOINT(COUNT)                          \
+  if(get_debug_status()){ while(get_debug_val() == COUNT); }  \
+
+
+#define BREAK_SET(VAL)                          \
+  if(get_debug_status()){ set_debug_val(VAL); }  \
+
+#endif

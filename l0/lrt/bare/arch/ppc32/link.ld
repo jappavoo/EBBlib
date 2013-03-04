@@ -29,17 +29,12 @@ SECTIONS
 	. = 0x0;
 	kstart = .;
 
-	.init :
-	{
-		*(.init.text);
-		*(.init.stack);
-	}
 	.isr :
 	{
 		*(.isr);
 	}	
 
-	.text ALIGN (4k) :
+	.text ALIGN (4K) :
 	{
 		*(.text)
 	}
@@ -61,11 +56,20 @@ SECTIONS
 		ebss = .;
 	}
 	
+	.init ALIGN (16K):
+	{
+		*(.init.entry);
+		*(.init.text);
+		*(.init.data);
+	}
+
 	/DISCARD/ :
 	{
 		*(.eh_frame);
 		*(.note*);
 		*(.comment);
 	}
+
+	
 	kend = .;	
 }

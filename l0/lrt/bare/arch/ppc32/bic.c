@@ -23,6 +23,8 @@
 #include <stdint.h>
 
 #include <l0/lrt/bare/arch/ppc32/bic.h>
+#include <l0/lrt/bare/arch/ppc32/fdt.h>
+#include <l0/lrt/bare/arch/ppc32/mmu.h>
 #include <lrt/assert.h>
 
 struct bg_irqctrl_group {
@@ -47,8 +49,7 @@ struct bg_irqctrl {
   volatile unsigned int core_mchk[4];
 } __attribute__((packed));
 
-static struct bg_irqctrl * const bg_irqctrl = 
-  (struct bg_irqctrl *)0xfffde000;
+static struct bg_irqctrl *bg_irqctrl;
 
 void
 bic_dump()
@@ -70,12 +71,22 @@ irq_to_target_index(uint8_t irq) {
 
 static inline void
 set_target(uint8_t group, uint8_t irq, uint8_t target) {
-  uint8_t offset = 28 - (irq * 4);
+  uint32_t offset = 28 - ((irq % 8) * 4);
   uint32_t val = 
     bg_irqctrl->groups[group].target_irq[irq_to_target_index(irq)];
   val &= ~(0xf << offset); //mask off the correct bits
   val |= (target & 0xf) << offset; //set the correct bits appropriately
   bg_irqctrl->groups[group].target_irq[irq_to_target_index(irq)] = val;
+}
+
+static inline uint8_t
+get_target(uint8_t group, uint8_t irq) {
+  uint32_t offset = 28 - ((irq % 8) * 4);
+  uint32_t val = 
+    bg_irqctrl->groups[group].target_irq[irq_to_target_index(irq)];
+  val >>= offset;
+  val &= 0xf;
+  return val;
 }
 
 void
@@ -116,7 +127,7 @@ bic_enable_irq(uint8_t group, uint8_t irq,
 }
 
 void
-bic_raise_irq(uint8_t group, uint8_t irq)
+bic_raise_irq(int group, int irq)
 {
   LRT_Assert(group < BIC_NUM_GROUPS);
   LRT_Assert(irq < BIC_NUM_IRQS);
@@ -124,9 +135,69 @@ bic_raise_irq(uint8_t group, uint8_t irq)
 }
 
 void
-bic_clear_irq(uint8_t group, uint8_t irq)
+bic_clear_irq(int group, int irq)
 {
   LRT_Assert(group < BIC_NUM_GROUPS);
   LRT_Assert(irq < BIC_NUM_IRQS);
   bg_irqctrl->groups[group].status_clr = 1 << (31 - irq);
+}
+
+void
+bic_clear_group(int group)
+{
+  LRT_Assert(group < BIC_NUM_GROUPS);
+  bg_irqctrl->groups[group].status = 0;
+}
+
+unsigned int bic_get_core_noncrit(lrt_event_loc loc)
+{
+  return bg_irqctrl->core_non_crit[loc];
+}
+
+int
+bic_get_status(uint8_t group)
+{
+  LRT_Assert(group < BIC_NUM_GROUPS);
+  return bg_irqctrl->groups[group].status;
+}
+
+bool
+bic_targeted_to(uint8_t group, uint8_t irq, 
+		enum bic_int_type type, int8_t loc)
+{
+  uint8_t target = type + 1;
+  if (loc != -1) { //not broadcast
+    target <<= 2;
+    target |= loc;
+  }
+  return get_target(group, irq) == target;
+}
+
+static uint64_t paddr;
+static uintptr_t vaddr;
+static uint32_t memsize;
+
+void
+bic_init()
+{
+  struct fdt_node *bic = fdt_get("/interrupt-controller");
+  LRT_Assert(bic);
+  
+  struct fdt_node *reg = fdt_get_in_node(bic, "reg");
+  LRT_Assert(reg);
+
+  paddr = fdt_read_prop_u64(reg, 0);
+  memsize = fdt_read_prop_u32(reg, 8);
+
+  //assume it is aligned
+  vaddr = (uintptr_t)tlb_map(paddr, memsize,
+			     TLB_INHIBIT | TLB_GUARDED);
+  bg_irqctrl = (struct bg_irqctrl *)vaddr;
+}
+
+void
+bic_secondary_init()
+{
+  tlb_map_fixed(paddr, vaddr, memsize,
+		TLB_INHIBIT | TLB_GUARDED);
 }

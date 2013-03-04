@@ -50,16 +50,12 @@ CObject(HelloWorld_Parallel) {
 EBBRC
 HelloWorld_Parallel_start(AppRef _self)
 {
-  static volatile int lock;
-  while (!__sync_bool_compare_and_swap(&lock, 0, 1))
-    ;
   lrt_printf("Hello world from event location %d\n",
              MyEventLoc());
-  lock = 0;
 
   static volatile int barrier_init;
   static struct barrier_s bar;
-  if (__sync_bool_compare_and_swap(&barrier_init, 0, 1)) {
+  if (atomic_bool_compare_and_swap32((uint32_t *)&barrier_init, 0, 1)) {
     init_barrier(&bar, NumEventLoc());
     barrier_init = 2;
   } else {
@@ -72,7 +68,9 @@ HelloWorld_Parallel_start(AppRef _self)
   if (lrt_my_event_loc() == 0) {
     lrt_exit(0);
   }
+  
   return EBBRC_OK;
+
 }
 
 CObjInterface(App) HelloWorld_Parallel_ftable = {

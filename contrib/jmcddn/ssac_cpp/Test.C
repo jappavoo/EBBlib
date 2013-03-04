@@ -7,7 +7,14 @@
 #include <mach/mach_interface.h>
 #include <mach/thread_policy.h>
 #endif
-
+#ifdef __BG__
+// TODO: verify that I need these
+#include <mpi.h>
+#include <spi/bgp_SPI.h>
+#include <spi/kernel_interface.h>
+#include <common/bpg_personality.h>
+#include <common/bpg_personality_inlines.h>
+#endif
 #include "EBBKludge.H"
 #include "Test.H"
 
@@ -41,7 +48,11 @@ static num_phys_cores()
   }
   return numcores;
 #else // if LINUX/UNIX
+#ifdef _BG_
+  return Kernel_ProcessorCount();
+#else
   return sysconf(_SC_NPROCESSORS_ONLN);
+#endif
 #endif
 }
 
@@ -73,9 +84,11 @@ linux_thread_init(void *arg)
 int
 create_bound_thread(pthread_t *tid, int id,  void *(*func)(void *), void *arg)
 {
-    int numcores, pid, rc;
+  printf("creating bound thread");
+  int numcores, pid, rc;
   numcores = num_phys_cores();
   pid = id % numcores;
+  printf("numcores=%d pid=%d\n", numcores, pid);
 
   if ((id < 0)) return -1;
 
@@ -133,31 +146,41 @@ Test::doWork() {
 
   // test iteration loop
   for(j=0; j<iterations; j++){
-    args = (struct TestPThreadArgs *)
-    malloc(sizeof(struct TestPThreadArgs) * numWorkers);
-    tassert((args != NULL), ass_printf("malloc failed\n"));
-   for (i=0; i<numWorkers; i++) {
-//    TRACE("creating thread #%d\n", i);
+    // allocate thread argument arrau
+    args = (struct TestPThreadArgs *) malloc(sizeof(struct TestPThreadArgs) * numWorkers);
+    //tassert((args != NULL), ass_printf("malloc failed\n"));
+
+    for (i=0; i<numWorkers; i++) {
       args[i].id = i;
       args[i].index = (j*numWorkers)+i;
       args[i].test = this;
-    // create bound threads if specified
-    if (bindThread > 0){
-      if ( create_bound_thread( &(args[i].tid), i, testPThreadFunc, (void *)&(args[i])) < 0) {
-	    perror("pthread_create");
-	    exit(-1);
+
+      /** THREAD BINDING
+       *  Thread binding is specified by the bindThread argument passed during
+       *  class constructor. 
+       *
+       *  Explicit Binding is handeled differently on Linux and OSX:
+       *  APPLE: Create suspended pthread -> apply affinity -> resume thread
+       *  LINUX: Create pthread -> pthread sets own infinity via pthread_setaddinity_np
+       **/
+      if (bindThread > 0){
+        if ( create_bound_thread( &(args[i].tid), i, testPThreadFunc, (void *)&(args[i])) < 0) {
+          perror("create_bound_thread");
+          exit(-1);
+        }
+      }else{
+        if ( pthread_create( &(args[i].tid), NULL, testPThreadFunc, (void *)&(args[i])) != 0) {
+          perror("pthread_create");
+          exit(-1);
+        }
       }
-    }else{
-      if ( pthread_create( &(args[i].tid), NULL, testPThreadFunc, (void *)&(args[i])) != 0) {
-	    perror("create_bound_thread");
-	    exit(-1);
-      }
+      // main thread acts as worker 
+      //testPThreadFunc((void*)&args[i]);
     }
-  }
     for (i = 0; i<numWorkers; i++)
       pthread_join(args[i].tid, NULL );
-      free(args);
-  }
+    free(args);
+  } // end iteration loop
   return 0;
 }
 

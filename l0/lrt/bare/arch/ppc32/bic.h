@@ -20,11 +20,15 @@
  * THE SOFTWARE.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
+#include <l0/lrt/event_loc.h>
 
 #define BIC_NUM_GROUPS (15)
 #define BIC_NUM_IRQS (32)
 static const uint8_t BIC_IPI_GROUP = 0;
+static const uint8_t BIC_CRIT_IPI_BASE = 4;
+
 enum bic_int_type {
   NONCRIT = 0,
   CRIT = 1,
@@ -36,5 +40,12 @@ void bic_disable_irq(uint8_t group, uint8_t irq);
 //loc is 0-3 core or -1 for broadcast
 void bic_enable_irq(uint8_t group, uint8_t irq,
 		    enum bic_int_type type, int8_t loc);
-void bic_raise_irq(uint8_t group, uint8_t irq);
-void bic_clear_irq(uint8_t group, uint8_t irq);
+void bic_raise_irq(int group, int irq);
+void bic_clear_irq(int group, int irq);
+void bic_clear_group(int group);
+int bic_get_status(uint8_t group);
+bool bic_targeted_to(uint8_t group, uint8_t irq, 
+		     enum bic_int_type type, int8_t loc);
+void bic_init(void);
+void bic_secondary_init(void);
+unsigned int bic_get_core_noncrit(lrt_event_loc loc);

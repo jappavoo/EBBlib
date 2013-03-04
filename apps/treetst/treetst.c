@@ -21,191 +21,172 @@
  */
 
 #include <config.h>
-
-#include <stdbool.h>
 #include <stdint.h>
 
-#include <l1/App.h>
-#include <lrt/exit.h>
+#include <l0/lrt/types.h>
+#include <l0/cobj/cobj.h>
 #include <lrt/io.h>
+#include <lrt/exit.h>
+#include <lrt/string.h>
+#include <l0/lrt/trans.h>
+#include <lrt/assert.h>
+#include <l0/cobj/CObjEBB.h>
+#include <l0/EBBMgrPrim.h>
+#include <l0/cobj/CObjEBBUtils.h>
+#include <l0/cobj/CObjEBBRoot.h>
+#include <l0/cobj/CObjEBBRootShared.h>
+#include <l0/cobj/CObjEBBRootMulti.h>
+#include <l0/cobj/CObjEBBRootMultiImp.h>
+#include <l0/EventMgrPrim.h>
+#include <l0/EventMgrPrimImp.h>
+#include <l0/MemMgr.h>
+#include <l0/MemMgrPrim.h>
+#include <l1/App.h>
+#include <l1/startinfo.h>
+
+#include <l0/lrt/bare/arch/ppc32/bg_tree.h>
+#include <l0/lrt/bare/arch/ppc32/link.h>
+#include <l0/lrt/bare/arch/ppc32/debug.h>
+#include <l0/lrt/event_irq_def.h>
+
+struct package{
+  int i;
+};
+
+
+/* TreeTst App Object */
 
 CObject(TreeTst) {
   CObjInterface(App) *ft;
 };
 
-/* static void *channel0 = (void *)0xd0000000; */
-/* static void *channel1 = (void *)0xd0002000; */
+EBBRC
+Treetst_rcv_print(union bgtree_header dst, struct bglink_hdr_tree lnkhdr, struct package *p){
 
-EBBRC 
-Treetst_start(AppRef _self, int argc, char **argv, 
-		 char **environ)
-{
-  uint32_t rdr0;
-  asm volatile (
-		"mfdcrx %[val], %[dcrn]"
-		: [val] "=r" (rdr0)
-		: [dcrn] "r" (0xc00)
-		);
-  rdr0 = (rdr0 >> 16) & 0xffff;
-
-  uint32_t rdr15;
-  asm volatile (
-		"mfdcrx %[val], %[dcrn]"
-		: [val] "=r" (rdr15)
-		: [dcrn] "r" (0xc07)
-		);
-  rdr15 = rdr15 & 0xffff;
   
-  if (!((rdr0 & 0x7000) && (rdr0 & 0x0700) &&
-	(rdr15 & 0x7000) && (rdr15 & 0x0700))) {
-    //Leaf Node on some route
-    uint8_t *tree[2] = {(uint8_t *)0xd0000000, (uint8_t *)0xd0002000};
-    //FIXME: This is not event driven, we just sit here and clean the tree
-    while (1) {
-      for (int i = 0; i < 2; i++) {
-	uint32_t status = *(volatile uint32_t *)(tree[i] + 0x40);
-	uint8_t rcv_hdr = status & 0xf;
-	while (rcv_hdr > 0) {
-	  *(volatile uint32_t *)(tree[i] + 0x30); //read header
-	  for (int j = 0; j < 256; j += 16) {
-	    asm volatile (
-			  "lfpdx 0, 0, %[addr]"
-			  :
-			  : [addr] "b" (tree[i] + 0x20)
-			  ); //read payload
-	  }
-	  rcv_hdr--;
-	}
-      }
-    }
-  } else {
-    //Non-leaf Node
-    asm volatile (
-		  "mfdcrx %[val], %[dcrn]"
-		  : [val] "=r" (rdr0)
-		  : [dcrn] "r" (0xc00)
-		  );
-    
-    rdr0 &= ~0x30000;
-    
-    asm volatile (
-		  "mtdcrx %[dcrn], %[val]"
-		  :
-		  : [dcrn] "r" (0xc00),
-		    [val] "r" (rdr0)
-		  );
-    
-    asm volatile (
-		  "mfdcrx %[val], %[dcrn]"
-		  : [val] "=r" (rdr15)
-		  : [dcrn] "r" (0xc07)
-		  );
-    
-    rdr15 &= ~0x3;
-    asm volatile (
-		  "mtdcrx %[dcrn], %[val]"
-		  :
-		  : [dcrn] "r" (0xc07),
-		    [val] "r" (rdr15)
-		  );
-  }
- /*  uint32_t rdr[8]; */
- /*  for (int i = 0; i < 8; i++) { */
- /*    uint32_t dcr; */
- /*    asm volatile ( */
- /* 		  "mfdcrx %[val], %[dcrn]" */
- /* 		  : [val] "=r" (dcr) */
- /* 		  : [dcrn] "r" (0xc00 + i) */
- /* 		  ); */
- /*    rdr[i] = dcr; */
- /*    dcr &= ~0x30003; //turn off local client source/target */
- /*    if (!(dcr & 0x70000000)) { //no source set */
- /*      dcr &= ~0x07000000; //disable targets */
- /*    } */
- /*    if (!(dcr & 0x07000000)) { //no target set */
- /*      dcr &= ~0x70000000; //disable source */
- /*    } */
- /*    if (!(dcr & 0x7000)) { //no source set */
- /*      dcr &= ~0x0700; //disable targets */
- /*    } */
- /*    if (!(dcr & 0x0700)) { //no target set */
- /*      dcr &= ~0x7000; //disable source */
- /*    } */
- /*    asm volatile ( */
- /* 		  "mtdcrx %[dcrn], %[val]" */
- /* 		  :  */
- /* 		  : [dcrn] "r" (0xc00 + i), */
- /* 		    [val] "r" (dcr) */
- /* 		  ); */
- /*  } */
- /*  uint32_t rstat; */
- /* loop: */
- /*  for (int i = 0; i < 1000; i++) { */
- /*    asm volatile ( */
- /* 		  "mfdcrx %[val], %[dcrn]" */
- /* 		  : [val] "=r" (rstat) */
- /* 		  : [dcrn] "r" (0xc13) */
- /* 		  ); */
- /*    if (!(rstat & 0x00ff0000)) { */
- /*      goto loop; */
- /*    } */
- /*  } */
- /*  uint32_t xstat; */
- /*  asm volatile ( */
- /* 		"mfdcrx %[val], %[dcrn]" */
- /* 		: [val] "=r" (xstat) */
- /* 		: [dcrn] "r" (0xc1f) */
- /* 		);   */
+  /*
+	TRACE("bgnet: stat=%x, dst=%x, hdr: conn=%x, "
+	      "this_pkt=%x, tot_pkt=%x, dst=%x, src=%x]\n",
+	      status.raw, dst.raw, lnkhdr.conn_id,
+	      lnkhdr.this_pkt, lnkhdr.total_pkt,
+	      lnkhdr.dst_key, lnkhdr.src_key);
+*/
 
- /*  uint32_t ch0rstat; */
- /*  asm volatile ( */
- /* 		"mfdcrx %[val], %[dcrn]" */
- /* 		: [val] "=r" (ch0rstat) */
- /* 		: [dcrn] "r" (0xc20) */
- /* 		);   */
- /*  uint32_t ch1rstat; */
- /*  asm volatile ( */
- /* 		"mfdcrx %[val], %[dcrn]" */
- /* 		: [val] "=r" (ch1rstat) */
- /* 		: [dcrn] "r" (0xc28) */
- /* 		);   */
- /*  uint32_t ch2rstat; */
- /*  asm volatile ( */
- /* 		"mfdcrx %[val], %[dcrn]" */
- /* 		: [val] "=r" (ch2rstat) */
- /* 		: [dcrn] "r" (0xc30) */
- /* 		);   */
- /*  uint32_t ch0sstat; */
- /*  asm volatile ( */
- /* 		"mfdcrx %[val], %[dcrn]" */
- /* 		: [val] "=r" (ch0sstat) */
- /* 		: [dcrn] "r" (0xc22) */
- /* 		);   */
- /*  uint32_t ch1sstat; */
- /*  asm volatile ( */
- /* 		"mfdcrx %[val], %[dcrn]" */
- /* 		: [val] "=r" (ch1sstat) */
- /* 		: [dcrn] "r" (0xc2a) */
- /* 		);   */
- /*  uint32_t ch2sstat; */
- /*  asm volatile ( */
- /* 		"mfdcrx %[val], %[dcrn]" */
- /* 		: [val] "=r" (ch2sstat) */
- /* 		: [dcrn] "r" (0xc32) */
- /* 		);   */
- /*  lrt_printf("RSTAT = %x, XSTAT = %x\n", rstat, xstat); */
- /*  lrt_printf("c0r: %x, c0s: %x, c1r: %x, c1s: %x, c2r %x, c2s %x\n", */
- /* 	     ch0rstat, ch0sstat, ch1rstat, ch1sstat, ch2rstat, ch2sstat); */
- /*  for (int i = 0; i < 8; i++) { */
- /*    uint32_t dcr; */
- /*    asm volatile ( */
- /* 		  "mfdcrx %[val], %[dcrn]" */
- /* 		  : [val] "=r" (dcr) */
- /* 		  : [dcrn] "r" (0xc00 + i) */
- /* 		  ); */
- /*    lrt_printf("RDR %d: Orig = %x, New = %x\n", i, rdr[i], dcr); */
- /*  } */
-  lrt_exit(0);
+  lrt_printf("Recieved: dst=%x, proto=%d, payload[%d] \n", dst.raw, lnkhdr.lnk_proto, p->i);
+  return EBBRC_OK;
+}
+
+EBBRC
+Treetst_rcv(void)
+{
+  lrt_printf("Receive\n");
+  struct bglink_hdr_tree lnkhdr __attribute__((aligned(16)));
+  unsigned i;
+  void *payloadptr;
+  union bgtree_status status;
+  union bgtree_header dst;
+  uintptr_t tree;
+  EBBRC rc = 0;
+
+  // receive on both channels
+  for( i = 0 ; i < BGP_NUM_CHANNEL; i++){
+    tree = bgtree_get_channel(i);
+    status.raw = *(volatile uint32_t *)(tree + 0x40); /* channel status */
+    while (status.x.rcv_hdr) {  /*while we have packets to read */
+      dst.raw = *(volatile uint32_t *)(tree + 0x30); /* read header*/
+      // XXX: disregarding packet header
+      // let's grab the link header from the payload
+      lnkhdr = *(volatile struct bglink_hdr_tree *)(tree + _BGP_TRx_DR);
+      // XXX: disregarding protocol, size, pkt count
+      // allocate and retrieve payload
+      rc = EBBPrimMalloc((TREE_FRAGPAYLOAD), &payloadptr, EBB_MEM_DEFAULT);
+      LRT_RCAssert(rc);
+      bgtree_receive_240(payloadptr, tree); /* read payload */
+      // so, lets print our data
+      if(lnkhdr.lnk_proto == 9)
+        Treetst_rcv_print(dst, lnkhdr, (struct package *)payloadptr);
+
+      // pick up packets that arrived meanwhile...
+      if ( (status.x.rcv_hdr--) == 0)
+        status.raw = *(volatile uint32_t *)(tree + 0x40); /* channel status */
+    }
+  }
+  return EBBRC_OK;
+}
+
+EBBRC
+Treetst_snd(int ch, int i){
+
+  struct bglink_hdr_tree lnkhdr __attribute__((aligned(16)));
+  union bgtree_header dest;
+  void *payloadptr = 0;
+  uintptr_t tree;
+  struct package p;
+
+  // init datastructures
+  EBBPrimMalloc((TREE_FRAGPAYLOAD), payloadptr, EBB_MEM_DEFAULT);
+  bzero(payloadptr, TREE_FRAGPAYLOAD);
+  bzero(&dest, sizeof(union bgtree_header)); 
+  bzero(&lnkhdr, sizeof(struct bglink_hdr_tree)); 
+
+  tree = bgtree_get_channel(ch);
+  p.i = i; /* send value */
+
+  /* configure link header */
+  //TODO:
+  /* uint32_t dst_key;
+     uint32_t src_key;
+     uint16_t conn_id;
+     uint8_t this_pkt;
+     uint8_t total_pkt;
+     uint16_t lnk_proto;  // net, con, ...
+     union link_proto_opt opt;
+     */
+   lnkhdr.lnk_proto  = 0x10;
+   lnkhdr.dst_key  = 0x10;
+  /* configure pkt header */
+  /*
+     union bgtree_header {
+     unsigned int raw;
+     struct {
+     unsigned int pclass	: 4;
+     unsigned int p2p	: 1;
+     unsigned int irq	: 1;
+     unsigned vector		: 24;
+     unsigned int csum_mode	: 2;
+     } p2p;
+     struct {
+     unsigned int pclass	: 4;
+     unsigned int p2p	: 1;
+     unsigned int irq	: 1;
+     unsigned int op		: 3;
+     unsigned int opsize	: 7;
+     unsigned int tag	: 14;
+     unsigned int csum_mode	: 2;
+     } bcast;
+     } 
+     */
+   dest.bcast.pclass = 15; //tree_route
+   dest.bcast.p2p = 0; // broadcast = true
+
+  memcpy((uintptr_t *)(tree + _BGP_TRx_HI), (&dest.raw), sizeof(union bgtree_header));/*write pkt header */
+  memcpy((uintptr_t *)(tree + _BGP_TRx_DI), &lnkhdr, sizeof(struct bglink_hdr_tree)); /*write lnk header */
+  memcpy(payloadptr, &p, sizeof(struct package));
+
+  bgtree_inject_packet(&dest.raw, &lnkhdr, payloadptr, tree);
+
+  return EBBRC_OK;
+}
+
+EBBRC
+Treetst_start(AppRef _self){
+  lrt_printf("Run treetest\n");
+
+  lrt_printf("send msg to con \n");
+  /* CON WRITE TEST -- send msgs to the linux console */
+  Treetst_snd(0,987);
+
+  lrt_printf("msg sent\n");
   return EBBRC_OK;
 }
 
@@ -213,5 +194,9 @@ CObjInterface(App) TreeTst_ftable = {
   .start = Treetst_start
 };
 
-APP(TreeTst);
+APP_START_ONE(TreeTst);
+
+
+
+
 

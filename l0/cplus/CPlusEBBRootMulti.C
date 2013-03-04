@@ -20,50 +20,42 @@
  * THE SOFTWARE.
  */
 
+#include <stddef.h>
 #include <config.h>
 #include <stdint.h>
-
-#include <l0/lrt/types.h>
-#include <l0/cobj/cobj.h>
-#include <lrt/io.h>
-#include <l0/lrt/trans.h>
-#include <l0/types.h>
-#include <l0/sys/trans.h>
 #include <lrt/assert.h>
+#include <l0/lrt/trans.h>
+#include <l0/cobj/cobj.h>
 #include <l0/cobj/CObjEBB.h>
 #include <l0/EBBMgrPrim.h>
-#include <l0/cobj/CObjEBBUtils.h>
-#include <l0/cobj/CObjEBBRoot.h>
-#include <l0/cobj/CObjEBBRootMulti.h>
-#include <l0/cobj/CObjEBBRootMultiImp.h>
-#include <l0/EventMgrPrim.h>
-#include <l0/EventMgrPrimImp.h>
 #include <l0/MemMgr.h>
 #include <l0/MemMgrPrim.h>
-#include <l1/App.h>
-#include <apps/ssactst/simpleTst.H>
 
-extern void simpleTst();
-CObject(SSACTST) {
-  CObjInterface(App) *ft;
-};
+#include <l0/cplus/CPlusEBB.H>
+#include <l0/cplus/CPlusEBBRoot.H>
+#include <l0/cplus/CPlusEBBRootShared.H>
 
-
-EBBRC
-SSACTST_start(AppRef _self, int argc, char **argv,
-	      char **environ)
+/* virtual */ EBBRC
+CPlusEBBRootShared::handleMiss(CPlusEBB **obj, EBBLTrans *lt, EBBFuncNum fnum)
 {
-  lrt_printf("SSACTST LOADED\n");
-  
-  simpleTst();
-
-  lrt_printf("finished simpleTst\n");
+  EBBCacheObj(lt, (EBBRep *)theRep);
+  *obj = theRep;
   return EBBRC_OK;
 }
 
-CObjInterface(App) SSACTST_ftable = {
-  .start = SSACTST_start
-};
+void *
+CPlusEBBRootShared::operator new(size_t size)
+{
+  void *val;
+  EBBRC rc;
+  rc = EBBPrimMalloc(size, &val, EBB_MEM_DEFAULT);
+  LRT_RCAssert(rc);
+  return val;
+}
 
-APP(SSACTST);
-
+void
+CPlusEBBRootShared::operator delete(void * p, size_t size)
+{
+  // NYI
+  LRT_RCAssert(0);
+}

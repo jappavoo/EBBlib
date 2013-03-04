@@ -23,7 +23,4 @@
 #error "This file must be included from l0/lrt/event_irq_def.h"
 #endif
 
-//FIXME: this is bullshit
-struct IRQ_t {
-  int num;
-};
+#include <l0/lrt/bare/arch/event_irq_def.h>

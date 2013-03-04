@@ -21,6 +21,7 @@
  */
 #include <config.h>
 #include <inttypes.h>
+#include <arch/atomic.h>
 #include <lrt/io.h>
 #include <lrt/assert.h>
 #include <l0/cobj/cobj.h>
@@ -31,6 +32,7 @@
 #include <l0/cobj/CObjEBBRootMultiImp.h>
 #include <l0/EBBMgrPrim.h>
 #include <l0/EventMgrPrimImp.h>
+#include <l0/IOMgrPrimImp.h>
 #include <l0/cobj/CObjEBBUtils.h>
 #include <l1/App.h>
 
@@ -53,6 +55,13 @@ EBB_init_default( )
 
   rc = EventMgrPrimImpInit();
   LRT_RCAssert(rc);
+
+#ifdef ARCH_PPC
+#if LRT_BARE
+  rc = IOMgrPrimImpInit();
+  LRT_RCAssert(rc);
+#endif
+#endif
 }
 
 
@@ -60,8 +69,7 @@ void
 create_app_obj_default(void)
 {
   EBBRC rc;
-  if (__sync_bool_compare_and_swap(&theAppId, (AppId)0,
-				   (AppId)-1)) {  
+  if (atomic_bool_compare_and_swap((uintptr_t *)&theAppId, 0, -1)) {  
     EBBId id;
     CObjEBBRootMultiImpRef appRoot;
     // create App instance and invoke its start

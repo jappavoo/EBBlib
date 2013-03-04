@@ -24,50 +24,91 @@
 #include <arch/powerpc/regs.h>
 	
 	.globl _start
-	.section .init.text, "ax"
+	.section .init.entry, "ax"
 	.balign 8
 _start:
-	nop
+  // clear caches
+	dccci r0, r0
+	iccci r0, r0
+	msync
 
-	mfspr	r21, SPRN_PIR
-	cmpwi	r21, 0
-	bgt	spin_secondary
+  // load interrupt vectors	
+	lis	r21, _vec_start@h
+	ori	r21, r21, _vec_start@l
+	mtspr	SPRN_IVPR, r21
+
+	li	r21, 0
+	mtspr	SPRN_IVOR0, r21
+	li	r21, 0x100
+	mtspr	SPRN_IVOR1, r21
+	li	r21, 0x200
+	mtspr	SPRN_IVOR2, r21
+	li	r21, 0x300
+	mtspr	SPRN_IVOR3, r21
+	li	r21, 0x400
+	mtspr	SPRN_IVOR4, r21
+	li	r21, 0x500
+	mtspr	SPRN_IVOR5, r21
+	li	r21, 0x600
+	mtspr	SPRN_IVOR6, r21
+	li	r21, 0x700
+	mtspr	SPRN_IVOR7, r21
+	li	r21, 0x800
+	mtspr	SPRN_IVOR8, r21
+	li	r21, 0x900
+	mtspr	SPRN_IVOR9, r21
+	li	r21, 0xA00
+	mtspr	SPRN_IVOR10, r21
+	li	r21, 0xB00
+	mtspr	SPRN_IVOR11, r21
+	li	r21, 0xC00
+	mtspr	SPRN_IVOR12, r21
+	li	r21, 0xD00
+	mtspr	SPRN_IVOR13, r21
+	li	r21, 0xE00
+	mtspr	SPRN_IVOR14, r21
+	li	r21, 0xF00
+	mtspr	SPRN_IVOR15, r21
+
+  // configure machine state register
+  // shift upper 16 bits
+	lis	r21, 0x2
+  // or-in lower 16 bits
+	ori	r21, r21, 0x3000
+	mtmsr 	r21
+
+	//set small data areas to 0
+	li	r13, 0
+	li	r2, 0
 
 	//load stack into r1
 	lis	r1, _mini_stack@h
 	ori	r1, r1, _mini_stack@l
 	subi	r1, r1, 112 //ask about this
 
-	//set small data areas to 0
-	li	r13, 0
-	li	r2, 0
-
-	//load init addr into r20
-	lis	r20, init@h
-	ori	r20, r20, init@l
-	
-	mtctr	r20
-	bctrl
+  // get core number
+	mfspr	r21, SPRN_PIR
+	lis	r22, entry_secondary@h
+	ori	r22, r22, entry_secondary@l
+  
+  // loop secoundary cores 
+1:
+	dcbi	0, r22
+	lwz	r23, 0(r22)
+	cmpw	r23, r21
+	bne	1b
+  // setup paging then call init
+	mr	r20, r3
+	bl 	init_mapping
+	mr	r3, r20
+	bl 	init
 spin:
 	b	spin
-
-entry_secondary: .long -1
-spin_secondary:
-	bl 	1f
-1:
-	mflr 	r1
-	subi 	r1, r1, 8 //get entry word
-2:
-	dcbi	0, r1
-	lwz	r2, 0(r1)
-	addi	r3, r2, 1
-	cmpwi	r3, 0
-	beq	2b
-	iccci	0, 0
-	mtlr	r2
-	blr
+  
+	.globl entry_secondary
+entry_secondary: .long 0
 	
-	.section .init.stack
-	.align 16
-	.space 0x4000
+	.section .init.data
+	.align 4
+	.space 0x1000
 _mini_stack:
