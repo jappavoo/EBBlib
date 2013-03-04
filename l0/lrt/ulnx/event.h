@@ -28,9 +28,9 @@ struct lrt_event_descriptor {
   lrt_trans_func_num fnum;
 };
 
+int lrt_event_get_event_nonblock(void); 
+void lrt_event_halt(void);
+
 #define LRT_EVENT_NUM_EVENTS (256)
-#define LRT_EVENT_FIRST_ALLOCATABLE_EVENT (0)
-#define LRT_EVENT_NUM_ALLOCATABLE_EVENTS \
-        (LRT_EVENT_NUM_EVENTS - LRT_EVENT_FIRST_ALLOCATABLE_EVENT)
 STATIC_ASSERT((1 << (sizeof(lrt_event_num) * 8)) >= LRT_EVENT_NUM_EVENTS,
               "lrt_event_num cannot hold the range of events!");

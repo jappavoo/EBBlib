@@ -29,16 +29,18 @@
 #include <arch/amd64/segmentation.h>
 #include <l0/lrt/bare/arch/amd64/init64.h>
 
-pml4_ent init_pml4[PML4_NUM_ENTS] 
+pml4_ent init_pml4[PML4_NUM_ENTS]
 __attribute__((aligned(PML4_ALIGN), section(".init.data32")));
 
-pdpt_ent init_pdpt[PDPT_NUM_ENTS] 
+pdpt_ent init_pdpt[PDPT_NUM_ENTS]
 __attribute__((aligned(PDPT_ALIGN), section(".init.data32")));
 
 pd_2m_ent init_pdir[4][PDIR_NUM_ENTS]
 __attribute__((aligned(PDIR_ALIGN), section(".init.data32")));
 
-gdt init_gdt __attribute__((section(".init.data32")));
+//One invalid entry and a code segment entry
+volatile segdesc init_gdt[2] __attribute__((aligned(8), section(".init.data32")));
+#define INIT32_CS (0x8)
 
 //TODO DS: Maybe this should do something?
 static inline void __attribute__ ((section(".init.text32"),noreturn))
@@ -48,17 +50,16 @@ panic(void)
     ;
 }
 
-
 //all calls from this function should be inlined
 void __attribute__ ((section(".init.text32"),noreturn))
-init32(multiboot_info_t *mbi, uint32_t magic) 
+init32(multiboot_info_t *mbi, uint32_t magic)
 {
 
   if (magic != MULTIBOOT_BOOTLOADER_MAGIC) {
     //we weren't loaded by a multiboot compliant loader!
     panic();
   }
-  
+
   if (!has_longmode()) {
     panic();
   }
@@ -68,15 +69,15 @@ init32(multiboot_info_t *mbi, uint32_t magic)
   }
 
   if (mbi->flags & MULTIBOOT_INFO_MEM_MAP) {
-    
+
     for (multiboot_memory_map_t *mmap = (multiboot_memory_map_t *)mbi->mmap_addr;
-	 mmap < (multiboot_memory_map_t *)(mbi->mmap_addr + mbi->mmap_length);
-	 mmap = (multiboot_memory_map_t *)(((unsigned char *)mmap) + 
-					   mmap->size + 
-					   sizeof(multiboot_uint32_t))) {
+         mmap < (multiboot_memory_map_t *)(mbi->mmap_addr + mbi->mmap_length);
+         mmap = (multiboot_memory_map_t *)(((unsigned char *)mmap) +
+                                           mmap->size +
+                                           sizeof(multiboot_uint32_t))) {
     }
   }
-  
+
   if (mbi->flags & MULTIBOOT_INFO_MODS) {
     multiboot_module_t mod __attribute__ ((unused));
     for (int i = 0; i < mbi->mods_count; i++) {
@@ -103,7 +104,7 @@ init32(multiboot_info_t *mbi, uint32_t magic)
   }
 
 
-  //map first 4GB idempotently using 2m pages
+  //map first 1GB idempotently using 2m pages
   init_pml4[0].present = 1;
   init_pml4[0].rw = 1;
   init_pml4[0].base = (uint64_t)(((uintptr_t)init_pdpt) >> 12);
@@ -123,8 +124,8 @@ init32(multiboot_info_t *mbi, uint32_t magic)
     }
   }
 
-  // now that data structures are ready we load them into the VMM 
-  // facilities and turn on: 
+  // now that data structures are ready we load them into the VMM
+  // facilities and turn on:
   //    1) Physical Address Extention (PAE)
   //    2) Long Mode
   //    3) Paging on
@@ -137,31 +138,31 @@ init32(multiboot_info_t *mbi, uint32_t magic)
   }
 
   //setup GDT
-  init_gdt.invalid.raw = 0;
-  init_gdt.code.raw = 0;
+  init_gdt[0].raw = 0;
+  init_gdt[1].raw = 0;
 
   //long mode code segment
-  init_gdt.code.type = 0x8; //code, execute only
-  init_gdt.code.s = 1; //not a system segment
-  init_gdt.code.p = 1; //present
-  init_gdt.code.l = 1; //long mode code segment
-  
-  load_gdtr(&init_gdt, sizeof(init_gdt));
+  init_gdt[1].type = 0x8; //code, execute only
+  init_gdt[1].s = 1; //not a system segment
+  init_gdt[1].p = 1; //present
+  init_gdt[1].l = 1; //long mode code segment
+
+  load_gdtr(init_gdt, sizeof(init_gdt));
 
   //since the GDT is now loaded with a longmode code segment, we must do
   // a long jump to init64
   __asm__ volatile (
-		    "andl $0xFFFFFFF0, %%esp\n"
-		    "sub $2, %%esp\n\t" //for alignment!
-		    "pushw %w[init32_cs]\n\t"
-		    "pushl %[init64]\n\t"
-		    "ljmp *(%%esp)"
-		    :
-		    :
-		    [init32_cs] "r" (0x08),
-		    [init64] "r" (&init64),
-		    "D" (mbi)
-		    );
-  
+                    "andl $0xFFFFFFF0, %%esp\n"
+                    "sub $2, %%esp\n\t" //for alignment!
+                    "pushw %w[init32_cs]\n\t"
+                    "pushl %[init64]\n\t"
+                    "ljmp *(%%esp)"
+                    :
+                    :
+                    [init32_cs] "r" (INIT32_CS),
+                    [init64] "r" (&init64),
+                    "D" (mbi)
+                    );
+
   panic();
 }

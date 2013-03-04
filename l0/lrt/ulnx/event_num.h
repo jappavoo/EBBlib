@@ -20,7 +20,9 @@
  * THE SOFTWARE.
  */
 #ifndef __LRT_EVENT_NUM_H__
-#error should be included from l0/lrt/event_num.h
+#error "should be included from l0/lrt/event_num.h"
 #endif
+
+#include <stdint.h>
 
 typedef uint8_t lrt_event_num;

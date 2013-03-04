@@ -26,6 +26,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define CACHE_LINE_ALIGNMENT 64
+
 /* MSRS */
 static const uint32_t MSR_LAPIC_BASE = 0x1b;
 static const uint32_t MSR_EFER = 0xc0000080;
@@ -54,6 +56,7 @@ static const uint32_t CPUID_EDX_HAS_LAPIC = 1 << 9;
 
 /* CPUID EXTENDED FEATURE FLAGS */
 static const uint32_t CPUID_EXT_HAS_1GPAGES = 1 << 26;
+static const uint32_t CPUID_EXT_HAS_RDTSCP = 1 << 27;
 static const uint32_t CPUID_EXT_HAS_LONGMODE = 1 << 29;
 
 /* CR0 FLAGS */
@@ -63,15 +66,21 @@ static const uint64_t CR0_PG = 1 << 31;
 static const uint64_t CR4_PAE = 1 << 5;
 
 
+static inline void
+cpu_relax()
+{
+  asm volatile("pause");
+}
+
 /* CPUID FUNCTIONS */
 
-static inline bool 
-has_cpuid(void) 
+static inline bool
+has_cpuid(void)
 {
   // Check if we can set and clear the ID Flag (bit 21) of the
   // EFLag register, indicates support of CPUID
   uintptr_t eflags, flipped, flippedback;
-  
+
   __asm__ volatile (
        //get eflags
        "pushf \n\t"
@@ -90,25 +99,25 @@ has_cpuid(void)
        "pushf\n\t"
        "pop %[flippedback]"
        : [eflags] "=r" (eflags),
-	 [flipped] "=r" (flipped),
-	 [flippedback] "=r" (flippedback)
+         [flipped] "=r" (flipped),
+         [flippedback] "=r" (flippedback)
        : [id_flag] "r" (ID_FLAG)
        );
 
   // Were we able to flip it and flip it back?
   return (((eflags & ID_FLAG) != (flipped & ID_FLAG)) &&
-	  ((flipped & ID_FLAG)) != (flippedback & ID_FLAG));
+          ((flipped & ID_FLAG)) != (flippedback & ID_FLAG));
 }
 
-static inline void 
+static inline void
 cpuid(uint32_t index, uint32_t *eax, uint32_t *ebx, uint32_t *ecx,
       uint32_t *edx)
 {
     __asm__ volatile (
-	"cpuid"
-	: "=a" (*eax), "=b" (*ebx), "=c" (*ecx), "=d" (*edx)
-	: "a" (index)
-	);
+        "cpuid"
+        : "=a" (*eax), "=b" (*ebx), "=c" (*ecx), "=d" (*edx)
+        : "a" (index)
+        );
 }
 
 /* CPUID FEATURES */
@@ -148,8 +157,6 @@ has_1gpages(void)
   }
 
 
-  //check for long mode
-
   uint32_t features, dummy;
 
   cpuid(CPUID_EXT_FEATURES, &dummy, &dummy, &dummy, &features);
@@ -157,8 +164,22 @@ has_1gpages(void)
   return (features & CPUID_EXT_HAS_1GPAGES);
 }
 
-static inline bool 
-has_longmode(void) 
+static inline bool
+has_rdtscp(void)
+{
+  if (!has_ext_features()) {
+    return false;
+  }
+
+  uint32_t features, dummy;
+
+  cpuid(CPUID_EXT_FEATURES, &dummy, &dummy, &dummy, &features);
+
+  return (features & CPUID_EXT_HAS_RDTSCP);
+}
+
+static inline bool
+has_longmode(void)
 {
   if (!has_ext_features()) {
     return false;
@@ -176,49 +197,49 @@ has_longmode(void)
 
 /* OTHER */
 
-static inline void 
+static inline void
 enable_pae(void)
 {
   uint32_t cr4;
   __asm__ volatile (
-	 "movl %%cr4, %[cr4]"
-	 : [cr4] "=r" (cr4)
-	 );
+         "movl %%cr4, %[cr4]"
+         : [cr4] "=r" (cr4)
+         );
   cr4 |= CR4_PAE;
   __asm__ volatile (
-	 "movl %[cr4], %%cr4"
-	 :
-	 : [cr4] "r" (cr4));
+         "movl %[cr4], %%cr4"
+         :
+         : [cr4] "r" (cr4));
 }
 
-static inline void 
+static inline void
 enable_longmode(void)
 {
   uint64_t efer;
   __asm__ volatile (
-	 "rdmsr"
-	 : "=A" (efer)
-	 : "c" (MSR_EFER)
-	 );
+         "rdmsr"
+         : "=A" (efer)
+         : "c" (MSR_EFER)
+         );
 
   efer |= MSR_EFER_LME;
 
   __asm__ volatile (
-	 "wrmsr"
-	 :
-	 : "A" (efer), "c" (MSR_EFER)
-	 );
+         "wrmsr"
+         :
+         : "A" (efer), "c" (MSR_EFER)
+         );
 }
 
-static inline bool 
+static inline bool
 longmode_active(void)
 {
   uint32_t eax, edx;
   __asm__ volatile (
-	 "rdmsr"
-	 : "=a" (eax), "=d" (edx)
-	 : "c" (MSR_EFER)
-	 );
+         "rdmsr"
+         : "=a" (eax), "=d" (edx)
+         : "c" (MSR_EFER)
+         );
 
   uint64_t efer = (((uint64_t)edx) << 32) | ((uint64_t)eax);
   return (efer & MSR_EFER_LMA);
@@ -229,15 +250,39 @@ enable_paging(void)
 {
   uint32_t cr0;
   __asm__ volatile (
-	 "movl %%cr0, %[cr0]"
-	 : [cr0] "=r" (cr0)
-	 );
+         "movl %%cr0, %[cr0]"
+         : [cr0] "=r" (cr0)
+         );
   cr0 |= CR0_PG;
   __asm__ volatile (
-	 "movl %[cr0], %%cr0"
-	 :
-	 : [cr0] "r" (cr0)
-	 );
+         "movl %[cr0], %%cr0"
+         :
+         : [cr0] "r" (cr0)
+         );
 }
 
+static inline uint64_t
+rdtsc(void) {
+  uint32_t low, high;
+  //serialize
+  asm volatile (
+                "xorl %%eax, %%eax\n\t"
+                "cpuid"
+                :
+                :
+                : "%rax", "%rbx", "%rcx", "%rdx");
+
+  asm volatile ("rdtsc"
+                : "=a" (low), "=d" (high));
+  return (uint64_t)high << 32 | low;
+}
+
+static inline uint64_t
+rdtscp(void) {
+  uint32_t low, high;
+   asm volatile ("rdtscp"
+                : "=a" (low), "=d" (high)
+                : : "ecx");
+  return (uint64_t)high << 32 | low;
+}
 #endif
