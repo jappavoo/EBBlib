@@ -7,14 +7,18 @@
 #include <mach/mach_interface.h>
 #include <mach/thread_policy.h>
 #endif
-#ifdef __BG__
-// TODO: verify that I need these
-#include <mpi.h>
+#ifdef _BG_
 #include <spi/bgp_SPI.h>
 #include <spi/kernel_interface.h>
-#include <common/bpg_personality.h>
-#include <common/bpg_personality_inlines.h>
+#include <common/bgp_personality.h>
+#include <common/bgp_personality_inlines.h>
+
+// BG NOTES
+// int MPIX_Pset_same_comm_create (MPI_Comm *pset_comm);
+// int MPIX_Cart_comm_create (MPI_Comm *cart_comm);
+// int MPIX_Pset_diff_comm_create (MPI_Comm *pset_comm);
 #endif
+
 #include "EBBKludge.H"
 #include "Test.H"
 
@@ -84,7 +88,6 @@ linux_thread_init(void *arg)
 int
 create_bound_thread(pthread_t *tid, int id,  void *(*func)(void *), void *arg)
 {
-  printf("creating bound thread");
   int numcores, pid, rc;
   numcores = num_phys_cores();
   pid = id % numcores;
@@ -146,41 +149,31 @@ Test::doWork() {
 
   // test iteration loop
   for(j=0; j<iterations; j++){
-    // allocate thread argument arrau
-    args = (struct TestPThreadArgs *) malloc(sizeof(struct TestPThreadArgs) * numWorkers);
-    //tassert((args != NULL), ass_printf("malloc failed\n"));
-
-    for (i=0; i<numWorkers; i++) {
+    args = (struct TestPThreadArgs *)
+    malloc(sizeof(struct TestPThreadArgs) * numWorkers);
+    tassert((args != NULL), ass_printf("malloc failed\n"));
+   for (i=0; i<numWorkers; i++) {
+//    TRACE("creating thread #%d\n", i);
       args[i].id = i;
       args[i].index = (j*numWorkers)+i;
       args[i].test = this;
-
-      /** THREAD BINDING
-       *  Thread binding is specified by the bindThread argument passed during
-       *  class constructor. 
-       *
-       *  Explicit Binding is handeled differently on Linux and OSX:
-       *  APPLE: Create suspended pthread -> apply affinity -> resume thread
-       *  LINUX: Create pthread -> pthread sets own infinity via pthread_setaddinity_np
-       **/
-      if (bindThread > 0){
-        if ( create_bound_thread( &(args[i].tid), i, testPThreadFunc, (void *)&(args[i])) < 0) {
-          perror("create_bound_thread");
-          exit(-1);
-        }
-      }else{
-        if ( pthread_create( &(args[i].tid), NULL, testPThreadFunc, (void *)&(args[i])) != 0) {
-          perror("pthread_create");
-          exit(-1);
-        }
+    // create bound threads if specified
+    if (bindThread > 0){
+      if ( create_bound_thread( &(args[i].tid), i, testPThreadFunc, (void *)&(args[i])) < 0) {
+	    perror("pthread_create");
+	    exit(-1);
       }
-      // main thread acts as worker 
-      //testPThreadFunc((void*)&args[i]);
+    }else{
+      if ( pthread_create( &(args[i].tid), NULL, testPThreadFunc, (void *)&(args[i])) != 0) {
+	    perror("create_bound_thread");
+	    exit(-1);
+      }
     }
+  }
     for (i = 0; i<numWorkers; i++)
       pthread_join(args[i].tid, NULL );
-    free(args);
-  } // end iteration loop
+      free(args);
+  }
   return 0;
 }
 
